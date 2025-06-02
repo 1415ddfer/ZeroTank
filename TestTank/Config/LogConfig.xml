@@ -1,0 +1,85 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<configuration>
+	<log4net>
+		<appender name="RollingLogFileAppender" type="log4net.Appender.RollingFileAppender">
+			<encoding value="utf-8" />
+			<!--日志文件名，路径, 每分钟开一个新文件-->
+			<datePattern value="yyyyMMdd\\HH-mm'_Demo.txt'" />
+			<file value="log\\" />
+			<!--最大文件大小-->
+			<maximumFileSize value="100kB" />
+			<!--是否在文件中追加,设为false则去将以前的记录覆盖-->
+			<appendToFile value="true" />
+			<!--混合使用日期和文件大小变换日志文件名|Composite|Size|Date|-->
+			<rollingStyle value="Composite" />
+			<!--日志文件名是否为静态-->
+			<staticLogFileName value="false" />
+			<!--最大变换数量-->
+			<param name="MaxSizeRollBackups" value="100" />
+			<layout type="log4net.Layout.PatternLayout">
+				<conversionPattern value="%date [thread:%thread] %-5level %logger - %message%newline" />
+			</layout>
+		</appender>
+
+		<!-- 将日志输出到控制台 -->
+		<appender name="ConsoleAppender" type="log4net.Appender.ConsoleAppender">
+			<layout type="log4net.Layout.PatternLayout">
+				<conversionPattern value="%date [thread:%thread] %-5level %logger - %message%newline" />
+			</layout>
+		</appender>
+		<!-- 将彩色日志输出到控制台 -->
+		<appender name="ColoredConsoleAppender" type="log4net.Appender.ColoredConsoleAppender">
+			<mapping>
+				<level value="ERROR" />
+				<foreColor value="White" />
+				<backColor value="Red, HighIntensity" />
+			</mapping>
+			<mapping>
+				<level value="WARN" />
+				<foreColor value="Yellow, HighIntensity" />
+			</mapping>
+			<mapping>
+				<level value="INFO" />
+				<foreColor value="Green" />
+			</mapping>
+			<mapping>
+				<level value="DEBUG" />
+				<foreColor value="White" />
+			</mapping>
+			<layout type="log4net.Layout.PatternLayout">
+				<conversionPattern value="%date %-5level %logger - %message%newline" />
+			</layout>
+		</appender>
+		<!-- Define our console output -->
+		<appender name="ColoredConsoleAppender1" type="log4net.Appender.ColoredConsoleAppender">
+			<mapping>
+				<level value="ERROR" />
+				<foreColor value="Red, HighIntensity" />
+			</mapping>
+			<mapping>
+				<level value="WARN" />
+				<foreColor value="Yellow, HighIntensity" />
+			</mapping>
+			<mapping>
+				<level value="INFO" />
+				<foreColor value="White, HighIntensity" />
+			</mapping>
+			<mapping>
+				<level value="DEBUG" />
+				<foreColor value="White" />
+			</mapping>
+
+			<Threshold value="DEBUG" />
+			<Layout type="log4net.Layout.PatternLayout">
+				<param name="ConversionPattern" value="[%d{ABSOLUTE}] %m%n" />
+			</Layout>
+		</appender>
+
+
+		<root>
+			<level value="All" />
+			<appender-ref ref="ColoredConsoleAppender" />
+			<appender-ref ref="RollingLogFileAppender" />
+		</root>
+	</log4net>
+</configuration>

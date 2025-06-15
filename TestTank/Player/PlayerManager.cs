@@ -1,6 +1,6 @@
 ﻿using System.Collections.Concurrent;
 
-namespace TestTank.Business.Player;
+namespace TestTank.Player;
 
 public static class PlayerManager
 {

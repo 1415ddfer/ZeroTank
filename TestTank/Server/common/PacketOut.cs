@@ -10,6 +10,7 @@ public static class PacketOutPool
 {
     static readonly ConcurrentBag<PacketOut> Pool;
     static readonly int MaxSize;
+    static uint _currentPoolSize;
 
     static PacketOutPool()
     {
@@ -21,6 +22,7 @@ public static class PacketOutPool
     {
         if (!Pool.TryTake(out var packet)) return new PacketOut(pid, clientId, extend1, extend2);
         packet.Initialize(pid, clientId, extend1, extend2);
+        Interlocked.Decrement(ref _currentPoolSize);
         return packet;
     }
 
@@ -30,7 +32,11 @@ public static class PacketOutPool
         {
             Pool.Add(packet);
         }
-        else Console.WriteLine("PacketOutPool： 缓存已满！");
+        else
+        {
+            Interlocked.Decrement(ref _currentPoolSize); // 抵消 Increment 带来的计数
+            Console.WriteLine("PacketOutPool： 缓存已满！");
+        }
     }
 }
 
@@ -158,7 +164,7 @@ public class PacketOut : SimplePacket
         var pos = ProtocolHeaderSize;
         foreach (var buffer in Buffers)
         {
-            buffer.Span.CopyTo(memory.Span.Slice(pos, pos+buffer.Len));
+            buffer.Span.CopyTo(memory.Span.Slice(pos, pos + buffer.Len));
             pos += buffer.Len;
         }
 
@@ -220,5 +226,4 @@ public class PacketOut : SimplePacket
         base.Free();
         PacketOutPool.Return(this);
     }
-    
 }

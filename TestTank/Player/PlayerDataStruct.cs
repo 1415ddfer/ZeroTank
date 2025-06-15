@@ -1,6 +1,6 @@
 ﻿using TestTank.Business.PlayerShow;
 
-namespace TestTank.Business.Player;
+namespace TestTank.Player;
 
 public class PlayerDataStruct
 {

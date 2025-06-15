@@ -1,12 +1,12 @@
-﻿using log4net;
+﻿// using log4net;
 using Microsoft.Extensions.DependencyInjection;
 using TestTank.Server.common;
 
-namespace TestTank.Business.Player;
+namespace TestTank.Player;
 
 public interface IAsyncPacketHandler
 {
-    Task HandleAsync(Player playerContext, PacketIn packet, CancellationToken cancellationToken);
+    Task HandleAsync(TestTank.Player.Player playerContext, PacketIn packet, CancellationToken cancellationToken);
 }
 
 [AttributeUsage(AttributeTargets.Class, Inherited = false, AllowMultiple = false)]
@@ -17,7 +17,7 @@ public sealed class PacketHandlerAttribute(int packetId) : Attribute
 
 public interface IPacketDispatcher
 {
-    Task DispatchAsync(Player playerContext, PacketIn packet, CancellationToken cancellationToken);
+    Task DispatchAsync(TestTank.Player.Player playerContext, PacketIn packet, CancellationToken cancellationToken);
 }
 
 public class PacketDispatcher(IServiceProvider serviceProvider, IReadOnlyDictionary<int, Type> handlerMap)
@@ -30,7 +30,7 @@ public class PacketDispatcher(IServiceProvider serviceProvider, IReadOnlyDiction
     // _handlerMap 存储 PacketID 到处理器类型的映射
     private readonly IReadOnlyDictionary<int, Type> _handlerMap = handlerMap ?? throw new ArgumentNullException(nameof(handlerMap));
 
-    public async Task DispatchAsync(Player playerContext, PacketIn packet, CancellationToken cancellationToken)
+    public async Task DispatchAsync(TestTank.Player.Player playerContext, PacketIn packet, CancellationToken cancellationToken)
     {
         if (playerContext == null)
         {
@@ -91,4 +91,3 @@ public class PacketDispatcher(IServiceProvider serviceProvider, IReadOnlyDiction
     }
 }
 
-}

@@ -1,8 +1,11 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-using System.Reflection; // For Assembly.GetExecutingAssembly()
-using log4net; // 引入 log4net
+﻿using System.Reflection;
+using log4net;
+using Microsoft.Extensions.DependencyInjection;
+// For Assembly.GetExecutingAssembly()
 
-namespace TestTank.Business.Player;
+// 引入 log4net
+
+namespace TestTank.Player;
 
 public static class ServiceProviderLocator
 {

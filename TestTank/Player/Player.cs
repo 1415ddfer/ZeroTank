@@ -1,11 +1,10 @@
 ﻿using System.Threading.Channels;
 using log4net;
-using TestTank.Business.Player.Business;
 using TestTank.Server;
 using TestTank.Server.common;
 using TestTank.Server.proto;
 
-namespace TestTank.Business.Player;
+namespace TestTank.Player;
 
 public class Player
 {
@@ -16,9 +15,8 @@ public class Player
     TlsClientSocket? _socket;
     
     private readonly Channel<PacketIn> _packetChannel;
-    private readonly CancellationTokenSource _cts = new();
-    
-    private readonly IPacketDispatcher _packetDispatcher; // Injected
+    private readonly Channel<UpdateValueCommand> _commandChannel;
+    private CancellationTokenSource? _cts;
 
     public Player(int roleId)
     {
@@ -42,9 +40,13 @@ public class Player
             _socket.PacketReceived -= OnPacketIn;
             await _socket.Disconnect();
         }
+        _cts = new CancellationTokenSource();
         _socket = socket;
         _socket.Disconnected += OnDisconnect;
         _socket.PacketReceived += OnPacketIn;
+        
+        await StartPlayerTask();
+        // await Dispose();
     }
 
     // protected override void TimeOutWarming()
@@ -89,6 +91,59 @@ public class Player
         }
         catch (OperationCanceledException)
         {
+        }
+    }
+    
+    private async IAsyncEnumerable<object> GetMergedChannel()
+    {
+        var packetReader = _packetChannel.Reader;
+        var commandReader = _commandChannel.Reader;
+
+        while (!_cancellationTokenSource.Token.IsCancellationRequested)
+        {
+            var packetTask = packetReader.WaitToReadAsync(_cancellationTokenSource.Token).AsTask();
+            var commandTask = commandReader.WaitToReadAsync(_cancellationTokenSource.Token).AsTask();
+
+            var completedTask = await Task.WhenAny(packetTask, commandTask);
+
+            if (completedTask == packetTask && await packetTask)
+            {
+                while (packetReader.TryRead(out var packet))
+                {
+                    yield return packet;
+                }
+            }
+            else if (completedTask == commandTask && await commandTask)
+            {
+                while (commandReader.TryRead(out var command))
+                {
+                    yield return command;
+                }
+            }
+            else
+            {
+                break;
+            }
+        }
+    }
+    
+    public async Task Dispose()
+    {
+        if (_cts is null) return;
+        try
+        {
+            _packetChannel.Writer.Complete();
+            _commandChannel.Writer.Complete();
+            
+            await _cts.CancelAsync();
+            await 
+            _networkStream?.Dispose();
+            _tcpClient?.Close();
+            _cancellationTokenSource?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Player {_playerId} 释放资源时发生错误: {ex.Message}");
         }
     }
 }

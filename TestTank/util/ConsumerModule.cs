@@ -5,7 +5,7 @@ namespace TestTank.util;
 
 public class ConsumerModule
 {
-    private static readonly ILog Log = LogManager.GetLogger(typeof(ConsumerModule));
+    // private static readonly ILog Log = LogManager.GetLogger(typeof(ConsumerModule));
     
     private readonly SemaphoreSlim _signal = new (0);
     private readonly BlockingCollection<Func<Task>> _normalTaskQueue = new();

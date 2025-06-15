@@ -1,33 +1,82 @@
-﻿
-using log4net.Config;
+﻿using System.Reflection;
+// using log4net.Config;
 using Microsoft.Extensions.DependencyInjection;
-using TestTank.Business.Player;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.ObjectPool;
+using MongoDB.Driver;
+using TestTank.Player;
+using TestTank.Server;
 
 
-[assembly: XmlConfigurator(ConfigFile = "Config//LogConfig.xml", Watch = true)]
+// [assembly: XmlConfigurator(ConfigFile = "Config//LogConfig.xml", Watch = true)]
+
 namespace TestTank;
 
 static class Program
 {
-    static void Main(string[] args)
+    static async Task Main(string[] args)
     {
         Console.WriteLine("Hello, World!");
-        var services = new ServiceCollection();
+        
+        var builder = Host.CreateApplicationBuilder(args);
 
-// 注册 Player 为 Scoped（每个客户端一个实例）
-        services.AddScoped<Player>();
+        // 注册服务到 DI 容器
+        
+        // // 注册 MongoDB 服务
+        // builder.Services.AddSingleton<IMongoClient>(_ =>
+        //     new MongoClient(builder.Configuration["MongoConnectionString"]));
+        // builder.Services.AddScoped<IMongoDatabase>(sp =>
+        //     sp.GetRequiredService<IMongoClient>().GetDatabase("appDB"));
+        //
+        // // 注册所有业务模块 (自动发现并注册)
+        // var moduleTypes = Assembly.GetExecutingAssembly().GetTypes()
+        //     .Where(t => t.IsSubclassOf(typeof(MongoDataModule<>)) && !t.IsAbstract);
+        //
+        // foreach (var type in moduleTypes)
+        // {
+        //     builder.Services.AddSingleton(typeof(MongoDataModule<>), type);
+        // }
+        //
+        // // 注册初始化服务
+        // builder.Services.AddSingleton<ModuleInitializationService>();
+        // builder.Services.AddSingleton<UserModuleInitializationService>();
+        // builder.Services.AddSingleton<GracefulShutdownManager>();
+        //
+        // // 后台服务托管
+        // builder.Services.AddHostedService<BackgroundModuleHost>();
+        
+        // 注册服务到 DI 容器
+        builder.Services.AddSingleton<ObjectPoolProvider, DefaultObjectPoolProvider>();
+        
+        builder.Services.AddSingleton<IPooledObjectPolicy<VisitorClient>, VisitorClientPoolPolicy>();
+        builder.Services.AddSingleton<ObjectPool<VisitorClient>>(sp => 
+            sp.GetRequiredService<ObjectPoolProvider>().Create(
+                sp.GetRequiredService<IPooledObjectPolicy<VisitorClient>>()
+            ));
+        
+        builder.Services.AddHostedService<TcpServer>();
 
-// 注册所有 PacketHandler
-        services.AddTransient<LoginHandler>();  // 假设 LoginHandler 处理 Pid=1001
-        services.AddTransient<MoveHandler>();   // 假设 MoveHandler 处理 Pid=2001
+        // 配置日志
+        builder.Logging.AddConsole();
+        builder.Logging.SetMinimumLevel(LogLevel.Information);
 
-// 注册处理器工厂，并绑定 Pid 与处理器类型
-        var handlerMap = new Dictionary<int, Type> {
-            { 1001, typeof(LoginHandler) },
-            { 2001, typeof(MoveHandler) }
+        var host = builder.Build();
+        
+
+        
+        // 添加优雅关闭
+        Console.CancelKeyPress += (sender, e) =>
+        {
+            e.Cancel = true;
+            host.StopAsync().Wait();
         };
-        services.AddSingleton<IPacketHandlerFactory>(new PacketHandlerFactory(handlerMap));
+        
+        Console.WriteLine("按 Ctrl+C 停止服务器");
+        
+        // 运行应用程序
+        await host.RunAsync();
 
-        var serviceProvider = services.BuildServiceProvider();
+
     }
 }

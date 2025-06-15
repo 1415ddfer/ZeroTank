@@ -1,58 +1,41 @@
-﻿using System.Collections.Concurrent;
-using System.Net.Sockets;
-using log4net;
+﻿using System.Net.Sockets;
+using Microsoft.Extensions.Logging;
 using TestTank.Business.account;
-using TestTank.Business.Player;
+using TestTank.Player;
 using TestTank.Server.common;
 
 namespace TestTank.Server;
 
-public static class ClientPool
-{
-    static readonly ConcurrentBag<VisitorClient> Pool;
-    static readonly int MaxSize;
-    static readonly ILog Log = LogManager.GetLogger(typeof(ClientPool));
-
-    static ClientPool()
-    {
-        Pool = [];
-        MaxSize = 30;
-    }
-
-
-    public static VisitorClient Rent()
-    {
-        return Pool.TryTake(out var client) ? client : new VisitorClient();
-    }
-
-    public static void Return(VisitorClient client)
-    {
-        if (Pool.Count < MaxSize)
-        {
-            Pool.Add(client);
-        }
-        else Log.Warn("缓存已满！");
-    }
-
-}
-
 // 用于处理客户端登录的层，登录后将socket移交给player
-public class VisitorClient
+public class VisitorClient(
+    ILogger<VisitorClient> logger,
+    PlayerAccountService accountService,
+    PlayerManager playerManager)
+    : IDisposable
 {
-    static readonly ILog Log = LogManager.GetLogger(typeof(VisitorClient));
-    
-    TlsClientSocket? _socket;
-
     private TaskCompletionSource<bool>? _tcs;
+    private readonly ILogger<VisitorClient> _logger = logger;
+    private readonly PlayerAccountService _accountService = accountService;
+    private readonly PlayerManager _playerManager = playerManager;
+
+    TlsClientSocket? _socket;
+    private Action? _returnAction;
 
 
-    public void OnClientConnect(Socket socket)
+    public void Initialize(Socket socket, Action returnAction)
     {
         _socket = new TlsClientSocket(socket);
-        
+        _returnAction = returnAction;
         _socket.Disconnected += OnDisconnect;
         _socket.PacketReceived += OnPacketIn;
         _ = WaitForPacket();
+    }
+
+    public void Reset()
+    {
+        _socket?.Disconnect();
+        _socket = null;
+        _tcs = null;
     }
 
     async Task WaitForPacket()
@@ -65,7 +48,7 @@ public class VisitorClient
         _tcs = null;
         if (state)
         {
-            Log.Info("登录超时断开连接");
+            _logger.LogInformation("登录超时断开连接");
             _socket?.Disconnect();
         }
     }
@@ -79,9 +62,10 @@ public class VisitorClient
             _socket.PacketReceived -= OnPacketIn;
             _socket = null;
         }
-        ClientPool.Return(this);
+
+        _returnAction?.Invoke();
     }
-    
+
     void OnPacketIn(PacketIn packet)
     {
         _tcs?.TrySetResult(true);
@@ -90,6 +74,7 @@ public class VisitorClient
             packet.Free();
             return;
         }
+
         _socket.Disconnected -= OnDisconnect;
         _socket.PacketReceived -= OnPacketIn;
         if (packet.Pid != 1)
@@ -97,40 +82,34 @@ public class VisitorClient
             packet.Free();
             _ = _socket.Disconnect();
             _socket = null;
-            ClientPool.Return(this);
+            _returnAction?.Invoke();
             return;
         }
+
         var roleId = PlayerAccount.TryLogin(packet, out var clientKey);
         if (roleId < 0)
         {
             var packet1 = PacketOutPool.Rent(1);
             packet1.WriteByte(1);
             var task = _socket.EnQueueSend(packet1);
-            Log.Info("登录失败断开连接");
+            _logger.LogInformation("登录失败断开连接");
             task.Wait();
-            
+
             packet.Free();
             _ = _socket.Disconnect();
             _socket = null;
-            ClientPool.Return(this);
+            _returnAction?.Invoke();
             return;
         }
+
         _socket.SetKey(clientKey);
         var player = PlayerManager.GetOrCreatePlayer(roleId);
-        
+
         packet.Free();
         _ = player.OnClientLogin(_socket);
         _socket = null;
-        ClientPool.Return(this);
+        _returnAction?.Invoke();
     }
     
-
-    
-    
-
-    
-    
-
+    public void Dispose() => Reset();
 }
-
-

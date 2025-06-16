@@ -1,4 +1,4 @@
-﻿namespace TestTank.Business.account;
+﻿namespace TestTank.Business.Login;
 
 public static class AccountSpace
 {

@@ -2,34 +2,13 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ObjectPool;
-using MongoDB.Driver;
-using TestTank.Player;
+using TestTank.Business;
+using TestTank.Business.Login;
+using TestTank.data;
 using TestTank.Server;
 
 
 namespace TestTank;
-
-// appsettings.json 配置示例
-/*
-{
-  "Logging": {
-    "LogLevel": {
-      "Default": "Information",
-      "Microsoft": "Warning",
-      "Microsoft.Hosting.Lifetime": "Information"
-    }
-  },
-  "Server": {
-    "Host": "0.0.0.0",
-    "Port": 8080,
-    "MaxConnections": 1000,
-    "AcceptPoolSize": 20,
-    "LoginTimeoutSeconds": 30,
-    "ReceiveBufferSize": 4096,
-    "SendBufferSize": 4096
-  }
-}
-*/
 
 class Program
 {
@@ -40,6 +19,10 @@ class Program
         // 配置绑定
         builder.Services.Configure<ServerConfiguration>(
             builder.Configuration.GetSection("Server"));
+        builder.Services.Configure<MongoDbConfiguration>(
+            builder.Configuration.GetSection("MongoDB"));
+        builder.Services.Configure<AccountConfiguration>(
+            builder.Configuration.GetSection("Account"));
 
         // 对象池配置
         builder.Services.AddSingleton<ObjectPoolProvider, DefaultObjectPoolProvider>();
@@ -50,7 +33,21 @@ class Program
             ));
 
         // 注册服务
+        // MongoDB相关服务
+        builder.Services.AddSingleton<IMongoContext, MongoContext>();
+        builder.Services.AddSingleton<IAccountRepository, AccountRepository>();
+
+        // 业务服务
+        builder.Services.AddSingleton<IAccountCacheService, AccountCacheService>();
+        builder.Services.AddSingleton<IAccountService, AccountService>();
+        builder.Services.AddTransient<PlayerAccount>();
+
+        // 后台服务
+        builder.Services.AddHostedService<DatabaseInitializationService>();
+        builder.Services.AddHostedService<AccountCleanupService>();
         builder.Services.AddHostedService<TcpServer>();
+        
+        // 其他服务
         builder.Services.AddSingleton<IConnectionManager, ConnectionManager>();
 
         // 日志配置

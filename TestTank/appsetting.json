@@ -1,0 +1,29 @@
+﻿{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft": "Warning",
+      "Microsoft.Hosting.Lifetime": "Information",
+      "TestTank": "Debug"
+    }
+  },
+  "Server": {
+    "Host": "0.0.0.0",
+    "Port": 8080,
+    "MaxConnections": 1000,
+    "AcceptPoolSize": 20,
+    "LoginTimeoutSeconds": 30,
+    "ReceiveBufferSize": 4096,
+    "SendBufferSize": 4096
+  },
+  "MongoDB": {
+    "ConnectionString": "mongodb://localhost:27017",
+    "DatabaseName": "testtank",
+    "ConnectionPoolSize": 100,
+    "ConnectionTimeout": "00:00:30"
+  },
+  "Account": {
+    "ExpireTimeMinutes": 5,
+    "CleanupIntervalMinutes": 1
+  }
+}

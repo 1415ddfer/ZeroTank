@@ -1,71 +1,72 @@
-﻿using System.Text;
-using log4net;
+using System.Text;
+using Microsoft.Extensions.Logging;
 using TestTank.Server.common;
 using TestTank.Server.proto;
-using ILog = log4net.ILog;
 
-namespace TestTank.Business.account;
+namespace TestTank.Business.Login;
 
-public static class PlayerAccount
+public class PlayerAccount(IAccountService accountService, ILogger<PlayerAccount> logger)
 {
-    static readonly ILog Log = LogManager.GetLogger(typeof(PlayerAccount));
-    
-    public static int TryLogin(PacketIn packet, out byte[] clientKey)
+    public int TryLogin(PacketIn packet, out byte[] clientKey)
     {
+        clientKey = [];
+
         try
         {
             var data = packet.Deserialize<ProtoC0>();
-            byte[] bytes;
-            {
-                bytes = RsaCrypt.RsaDecrypt1(data.LoginData);
-            }
+            var bytes = RsaCrypt.RsaDecrypt1(data.LoginData);
             clientKey = bytes[7..15];
+
             var utf8 = new UTF8Encoding();
             var loginSrc = utf8.GetString(bytes[15..]);
             var arr = loginSrc.Split(',', 2);
-            var roleId = Account.TcpLogin(arr[0], arr[1]);
-            if (roleId != 0) return roleId;
-            Log.Info($"账号{arr[0]}登录失败!");
+
+            if (arr.Length != 2)
+            {
+                logger.LogWarning("登录数据格式错误");
+                return -1;
+            }
+
+            var roleId = accountService.TcpLogin(arr[0], arr[1]);
+            if (roleId != 0)
+            {
+                return roleId;
+            }
+
+            logger.LogWarning("账号 {Username} 登录失败!", arr[0]);
             return -1;
         }
-        catch (Exception e)
+        catch (Exception ex)
         {
-            Log.Error($"登录时出现异常{e.Message}--{e.StackTrace}");
-            clientKey = [];
+            logger.LogError(ex, "登录时出现异常");
             return -1;
         }
     }
 
-    public static bool TryLoginHttp(int roleId, string src)
+    public bool TryLoginHttp(int roleId, string src)
     {
-        byte[] ba;
         try
         {
-            ba = RsaCrypt.RsaDecrypt2(src);
-        }
-        catch (Exception _)
-        {
-            Log.Error("密文解密失败!");
-            return false;
-        }
-        try
-        {
+            byte[] ba = RsaCrypt.RsaDecrypt2(src);
             var utf8 = new UTF8Encoding();
             var arr = utf8.GetString(ba[7..]).Split(",");
-            if (arr.Length != 4) return false;
+
+            if (arr.Length != 4)
+            {
+                logger.LogWarning("HTTP登录数据格式错误");
+                return false;
+            }
+
             var acc = arr[0];
             var webKey = arr[1];
             var clientKey = arr[2];
-            // var nick = arr[3];
-            return Account.ClientLogin(acc, webKey, clientKey, roleId);
+
+            return accountService.ClientLogin(acc, webKey, clientKey, roleId);
         }
-        catch (Exception e)
+        catch (Exception ex)
         {
-            Log.Error($"密文序列化失败!{e.Message}--{e.StackTrace}");
+            logger.LogError(ex, "HTTP登录时发生错误");
             return false;
         }
-
     }
-    
-
 }

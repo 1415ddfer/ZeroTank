@@ -12,7 +12,7 @@ public class LimitedObjectPool<T> : IDisposable
     bool _isDisposed;
 
 
-    public LimitedObjectPool(uint capacity)
+    protected LimitedObjectPool(uint capacity)
     {
         if (capacity <= 0)
         {
@@ -34,16 +34,14 @@ public class LimitedObjectPool<T> : IDisposable
     /// <param name="obj">要归还的对象。</param>
     /// <exception cref="ArgumentNullException">对象不能为null。</exception>
     /// <exception cref="ObjectDisposedException">如果池已被释放。</exception>
-    public void Push(T obj)
+    public virtual void Push(T obj)
     {
-        if (obj == null)
-        {
-            throw new ArgumentNullException(nameof(obj));
-        }
-        if (_isDisposed)
-        {
-            throw new ObjectDisposedException(nameof(LimitedObjectPool<T>));
-        }
+        // if (obj == null)
+        // {
+        //     throw new ArgumentNullException(nameof(obj));
+        // }
+        // ObjectDisposedException.ThrowIf(_isDisposed, nameof(LimitedObjectPool<T>));
+
         if (Interlocked.Increment(ref _currentPoolSize) <= _maxSize)
         {
             _pool.Add(obj);

@@ -4,18 +4,24 @@ using Microsoft.Extensions.ObjectPool;
 namespace TestTank.Server;
 
 
-public class VisitorClientPoolPolicy : IPooledObjectPolicy<VisitorClient>
+public class VisitorClientPoolPolicy(IServiceProvider serviceProvider) : IPooledObjectPolicy<VisitorClient>
 {
-    private readonly IServiceProvider _serviceProvider;
-    public VisitorClientPoolPolicy(IServiceProvider serviceProvider) 
-        => _serviceProvider = serviceProvider;
-
-    public VisitorClient Create() 
-        => ActivatorUtilities.CreateInstance<VisitorClient>(_serviceProvider);
+    public VisitorClient Create()
+    {
+        return ActivatorUtilities.CreateInstance<VisitorClient>(serviceProvider);
+    }
 
     public bool Return(VisitorClient client)
     {
-        client.Reset(); // 重置状态
-        return true;
+        try
+        {
+            client.Reset();
+            return true;
+        }
+        catch (Exception)
+        {
+            // 如果重置失败，不要将对象返回到池中
+            return false;
+        }
     }
 }

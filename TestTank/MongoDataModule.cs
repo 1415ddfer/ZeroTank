@@ -2,6 +2,14 @@
 
 namespace TestTank;
 
+public interface IDataModule
+{
+    string ModuleName { get; }
+    Task LoadAsync();
+    Task UpdateAsync();
+    Task InitializeAsync();
+}
+
 public abstract class MongoDataModule<T> : IDisposable
 {
     protected readonly IMongoDatabase _database;

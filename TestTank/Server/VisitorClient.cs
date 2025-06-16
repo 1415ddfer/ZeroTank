@@ -8,15 +8,10 @@ namespace TestTank.Server;
 
 // 用于处理客户端登录的层，登录后将socket移交给player
 public class VisitorClient(
-    ILogger<VisitorClient> logger,
-    PlayerAccountService accountService,
-    PlayerManager playerManager)
+    ILogger<VisitorClient> logger)
     : IDisposable
 {
     private TaskCompletionSource<bool>? _tcs;
-    private readonly ILogger<VisitorClient> _logger = logger;
-    private readonly PlayerAccountService _accountService = accountService;
-    private readonly PlayerManager _playerManager = playerManager;
 
     TlsClientSocket? _socket;
     private Action? _returnAction;
@@ -48,7 +43,7 @@ public class VisitorClient(
         _tcs = null;
         if (state)
         {
-            _logger.LogInformation("登录超时断开连接");
+            logger.LogInformation("登录超时断开连接");
             _socket?.Disconnect();
         }
     }
@@ -92,7 +87,7 @@ public class VisitorClient(
             var packet1 = PacketOutPool.Rent(1);
             packet1.WriteByte(1);
             var task = _socket.EnQueueSend(packet1);
-            _logger.LogInformation("登录失败断开连接");
+            logger.LogInformation("登录失败断开连接");
             task.Wait();
 
             packet.Free();
@@ -103,10 +98,10 @@ public class VisitorClient(
         }
 
         _socket.SetKey(clientKey);
-        var player = PlayerManager.GetOrCreatePlayer(roleId);
-
-        packet.Free();
-        _ = player.OnClientLogin(_socket);
+        // var player = PlayerManager.GetOrCreatePlayer(roleId);
+        //
+        // packet.Free();
+        // _ = player.OnClientLogin(_socket);
         _socket = null;
         _returnAction?.Invoke();
     }

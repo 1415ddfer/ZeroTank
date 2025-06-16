@@ -3,12 +3,13 @@ using System.Net.Sockets;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ObjectPool;
+using Microsoft.Extensions.Options;
 using TestTank.util;
 
 namespace TestTank.Server;
 
 // 改进的 SocketAsyncEventArgs 对象池
-public class SocketAsyncEventArgsPool(uint maxPoolSize, Func<SocketAsyncEventArgs> factory, Action log)
+public class SocketAsyncEventArgsPool(uint maxPoolSize, Func<SocketAsyncEventArgs> factory, ILogger logger)
     : LimitedObjectPool<SocketAsyncEventArgs>(maxPoolSize)
 {
     public SocketAsyncEventArgs Pop()
@@ -16,10 +17,28 @@ public class SocketAsyncEventArgsPool(uint maxPoolSize, Func<SocketAsyncEventArg
         return TryTake(out var args) ? args : factory();
     }
 
+    public override void Push(SocketAsyncEventArgs arg)
+    {
+        arg.AcceptSocket = null;
+        arg.SetBuffer(null, 0, 0);
+        base.Push(arg);
+    }
+
     protected override void OnPoolFull()
     {
-        log();
+        logger.LogDebug("SocketAsyncEventArgs pool is full, disposing object");
     }
+}
+
+public class ServerConfiguration
+{
+    public string Host { get; set; } = "0.0.0.0";
+    public int Port { get; set; } = 8080;
+    public int MaxConnections { get; set; } = 1000;
+    public int AcceptPoolSize { get; set; } = 20;
+    public int LoginTimeoutSeconds { get; set; } = 30;
+    public int ReceiveBufferSize { get; set; } = 4096;
+    public int SendBufferSize { get; set; } = 4096;
 }
 
 public class TcpServer : BackgroundService
@@ -27,20 +46,104 @@ public class TcpServer : BackgroundService
     private readonly ILogger<TcpServer> _logger;
     private readonly IServiceProvider _serviceProvider;
     private readonly ObjectPool<VisitorClient> _visitorClientPool;
+    private readonly IConnectionManager _connectionManager;
+    private readonly ServerConfiguration _config;
+
     private Socket? _listenSocket;
     private readonly IPEndPoint _endPoint;
-    private readonly SemaphoreSlim _maxConnections;
-    private readonly SocketAsyncEventArgsPool _acceptPool;
-    private bool _isRunning;
+    private SocketAsyncEventArgsPool? _acceptPool;
+    private volatile bool _isRunning;
+    private readonly CancellationTokenSource _serverCts = new();
 
-    public TcpServer(ILogger<TcpServer> logger, IServiceProvider serviceProvider, ObjectPool<VisitorClient> visitorClientPool)
+    public TcpServer(
+        ILogger<TcpServer> logger,
+        IServiceProvider serviceProvider,
+        ObjectPool<VisitorClient> visitorClientPool,
+        IConnectionManager connectionManager,
+        IOptions<ServerConfiguration> config)
     {
         _logger = logger;
         _serviceProvider = serviceProvider;
         _visitorClientPool = visitorClientPool;
-        _endPoint = new IPEndPoint(IPAddress.Any, 8080);
-        _maxConnections = new SemaphoreSlim(100, 100); // 最大100个并发连接
-        _acceptPool = new SocketAsyncEventArgsPool(10, CreateAcceptEventArgs, OnPoolFulled); // Accept事件参数Pool
+        _connectionManager = connectionManager;
+        _config = config.Value;
+        _endPoint = new IPEndPoint(IPAddress.Parse(_config.Host), _config.Port);
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, _serverCts.Token);
+
+        try
+        {
+            await StartTcpServerAsync(linkedCts.Token);
+            await Task.Delay(Timeout.Infinite, linkedCts.Token);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            _logger.LogInformation("TCP服务器正在关闭...");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "TCP服务器遇到错误");
+        }
+        finally
+        {
+            StopTcpServer();
+        }
+    }
+
+    private Task StartTcpServerAsync(CancellationToken cancellationToken)
+    {
+        if (_isRunning) return Task.CompletedTask;
+
+        try
+        {
+            _listenSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            _listenSocket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            _listenSocket.Bind(_endPoint);
+            _listenSocket.Listen(_config.MaxConnections);
+
+            _acceptPool = new SocketAsyncEventArgsPool(
+                (uint)_config.AcceptPoolSize,
+                CreateAcceptEventArgs,
+                _logger);
+
+            _isRunning = true;
+            _logger.LogInformation("TCP服务器已启动，监听地址: {EndPoint}, 最大连接数: {MaxConnections}",
+                _endPoint, _config.MaxConnections);
+
+            // 启动多个Accept操作以提高并发性能
+            for (var i = 0; i < Math.Min(_config.AcceptPoolSize, 10); i++)
+            {
+                StartAccept();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "启动TCP服务器失败");
+            throw;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void StopTcpServer()
+    {
+        if (!_isRunning) return;
+
+        _isRunning = false;
+
+        try
+        {
+            _listenSocket?.Close();
+            _acceptPool?.Dispose();
+            _logger.LogInformation("TCP服务器已停止");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "停止TCP服务器时发生错误");
+        }
     }
 
     private SocketAsyncEventArgs CreateAcceptEventArgs()
@@ -50,129 +153,120 @@ public class TcpServer : BackgroundService
         return acceptEventArgs;
     }
 
-    private void OnPoolFulled()
+    private void StartAccept()
     {
-        _logger.LogInformation("Args Pool is Fulled");
-    }
+        if (!_isRunning || _serverCts.Token.IsCancellationRequested) return;
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
+        var acceptEventArgs = _acceptPool!.Pop();
+
         try
         {
-            await StartTcpServerAsync(stoppingToken);
-
-            // 保持服务运行，直到收到停止信号
-            await Task.Delay(Timeout.Infinite, stoppingToken);
-        }
-        catch (OperationCanceledException)
-        {
-            _logger.LogInformation("TCP Server was cancelled");
+            var willRaiseEvent = _listenSocket!.AcceptAsync(acceptEventArgs);
+            if (!willRaiseEvent)
+            {
+                _ = Task.Run(() => ProcessAccept(acceptEventArgs));
+            }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "TCP Server encountered an error");
-        }
-        finally
-        {
-            await StopTcpServerAsync(stoppingToken);
-        }
-    }
-
-    private async Task StartTcpServerAsync(CancellationToken cancellationToken = default)
-    {
-        if (_isRunning) return;
-
-        _listenSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-        _listenSocket.Bind(_endPoint);
-        _listenSocket.Listen(100);
-
-        _isRunning = true;
-        _logger.LogInformation("TCP Server started on {EndPoint}", _endPoint);
-
-        // 开始接受连接
-        StartAccept();
-
-        await Task.CompletedTask;
-    }
-
-    private async Task StopTcpServerAsync(CancellationToken cancellationToken = default)
-    {
-        if (!_isRunning) return;
-
-        _isRunning = false;
-        _listenSocket?.Close();
-        _logger.LogInformation("TCP Server stopped");
-
-        await Task.CompletedTask;
-    }
-
-    private void StartAccept()
-    {
-        if (!_isRunning) return;
-
-        var acceptEventArgs = _acceptPool.Pop();
-
-        // 清理之前的Socket引用
-        acceptEventArgs.AcceptSocket = null;
-
-        var willRaiseEvent = _listenSocket!.AcceptAsync(acceptEventArgs);
-        if (!willRaiseEvent)
-        {
-            ProcessAccept(acceptEventArgs);
+            _logger.LogError(ex, "开始接受连接时发生错误");
+            _acceptPool.Push(acceptEventArgs);
         }
     }
 
     private void OnAcceptCompleted(object? sender, SocketAsyncEventArgs e)
     {
-        ProcessAccept(e);
+        _ = Task.Run(() => ProcessAccept(e));
     }
 
-    private void ProcessAccept(SocketAsyncEventArgs acceptEventArgs)
+    private async void ProcessAccept(SocketAsyncEventArgs acceptEventArgs)
     {
-        if (acceptEventArgs.SocketError == SocketError.Success && acceptEventArgs.AcceptSocket != null)
-        {
-            _logger.LogInformation("Client connected: {RemoteEndPoint}",
-                acceptEventArgs.AcceptSocket.RemoteEndPoint);
-
-            // 在这里可以创建 Session 来处理客户端连接
-            // 省略 Session 创建过程，仅记录连接信息
-            HandleClientConnection(acceptEventArgs.AcceptSocket);
-        }
-        else
-        {
-            _logger.LogWarning("Accept failed with error: {SocketError}", acceptEventArgs.SocketError);
-        }
-
-        // 将 SocketAsyncEventArgs 返回到池中
-        _acceptPool.Push(acceptEventArgs);
-
-        // 继续接受下一个连接
-        StartAccept();
-    }
-
-    private void HandleClientConnection(Socket clientSocket)
-    {
-        var visitorClient = _visitorClientPool.Get();
         try
         {
-            visitorClient.Initialize(clientSocket, () => _visitorClientPool.Return(visitorClient));
+            if (acceptEventArgs is { SocketError: SocketError.Success, AcceptSocket: not null } &&
+                _isRunning)
+            {
+                var clientSocket = acceptEventArgs.AcceptSocket;
+                var remoteEndPoint = clientSocket.RemoteEndPoint;
+
+                // 检查连接数限制
+                if (!await _connectionManager.TryAcquireConnectionAsync(_serverCts.Token))
+                {
+                    _logger.LogWarning("达到最大连接数限制，拒绝连接: {RemoteEndPoint}", remoteEndPoint);
+                    clientSocket.Close();
+                }
+                else
+                {
+                    _logger.LogInformation("客户端已连接: {RemoteEndPoint}, 活跃连接数: {ActiveConnections}",
+                        remoteEndPoint, _connectionManager.ActiveConnections);
+
+                    _ = Task.Run(() => HandleClientConnectionAsync(clientSocket));
+                }
+            }
+            else if (acceptEventArgs.SocketError != SocketError.OperationAborted)
+            {
+                _logger.LogWarning("接受连接失败: {SocketError}", acceptEventArgs.SocketError);
+            }
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "处理接受连接时发生错误");
+        }
+        finally
+        {
+            _acceptPool!.Push(acceptEventArgs);
+            StartAccept(); // 继续接受下一个连接
+        }
+    }
+
+    private async Task HandleClientConnectionAsync(Socket clientSocket)
+    {
+        var visitorClient = _visitorClientPool.Get();
+
+        try
+        {
+            await Task.Run(() => visitorClient.Initialize(clientSocket, () =>
+            {
+                _visitorClientPool.Return(visitorClient);
+                _connectionManager.ReleaseConnection();
+            }));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "处理客户端连接时发生错误: {RemoteEndPoint}",
+                clientSocket.RemoteEndPoint);
+
             _visitorClientPool.Return(visitorClient);
-            _logger.LogError(ex.Message);
+            _connectionManager.ReleaseConnection();
+
+            try
+            {
+                clientSocket.Close();
+            }
+            catch (Exception closeEx)
+            {
+                _logger.LogWarning(closeEx, "关闭客户端连接时发生错误");
+            }
         }
     }
 
     public override void Dispose()
     {
+        _serverCts.Cancel();
         _isRunning = false;
-        _listenSocket?.Close();
-        _listenSocket?.Dispose();
-        _maxConnections?.Dispose();
-        _acceptPool?.Dispose();
 
-        // 调用基类的 Dispose
+        try
+        {
+            _listenSocket?.Close();
+            _listenSocket?.Dispose();
+            _acceptPool?.Dispose();
+            _serverCts.Dispose();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "释放资源时发生错误");
+        }
+
         base.Dispose();
     }
 }

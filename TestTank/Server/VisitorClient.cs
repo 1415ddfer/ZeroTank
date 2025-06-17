@@ -1,21 +1,16 @@
 ﻿using System.Net.Sockets;
 using Microsoft.Extensions.Logging;
 using TestTank.Business.Login;
-using TestTank.Player;
 using TestTank.Server.common;
 
 namespace TestTank.Server;
 
 // 用于处理客户端登录的层，登录后将socket移交给player
-public class VisitorClient(
-    ILogger<VisitorClient> logger)
-    : IDisposable
+public class VisitorClient(ILogger<VisitorClient> logger, PlayerAccount playerAccount) : IDisposable
 {
     private TaskCompletionSource<bool>? _tcs;
-
-    TlsClientSocket? _socket;
+    private TlsClientSocket? _socket;
     private Action? _returnAction;
-
 
     public void Initialize(Socket socket, Action returnAction)
     {
@@ -33,7 +28,7 @@ public class VisitorClient(
         _tcs = null;
     }
 
-    async Task WaitForPacket()
+    private async Task WaitForPacket()
     {
         _tcs = new TaskCompletionSource<bool>();
         // 等待事件或超时（5秒）
@@ -48,7 +43,7 @@ public class VisitorClient(
         }
     }
 
-    void OnDisconnect()
+    private void OnDisconnect()
     {
         _tcs?.TrySetResult(true);
         if (_socket != null)
@@ -61,7 +56,7 @@ public class VisitorClient(
         _returnAction?.Invoke();
     }
 
-    void OnPacketIn(PacketIn packet)
+    private void OnPacketIn(PacketIn packet)
     {
         _tcs?.TrySetResult(true);
         if (_socket == null)
@@ -72,6 +67,7 @@ public class VisitorClient(
 
         _socket.Disconnected -= OnDisconnect;
         _socket.PacketReceived -= OnPacketIn;
+
         if (packet.Pid != 1)
         {
             packet.Free();
@@ -81,7 +77,8 @@ public class VisitorClient(
             return;
         }
 
-        var roleId = PlayerAccount.TryLogin(packet, out var clientKey);
+        // 使用注入的PlayerAccount实例
+        var roleId = playerAccount.TryLogin(packet, out var clientKey);
         if (roleId < 0)
         {
             var packet1 = PacketOutPool.Rent(1);
@@ -99,12 +96,12 @@ public class VisitorClient(
 
         _socket.SetKey(clientKey);
         // var player = PlayerManager.GetOrCreatePlayer(roleId);
-        //
         // packet.Free();
         // _ = player.OnClientLogin(_socket);
+
         _socket = null;
         _returnAction?.Invoke();
     }
-    
+
     public void Dispose() => Reset();
 }

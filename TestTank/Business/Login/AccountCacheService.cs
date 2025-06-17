@@ -27,10 +27,7 @@ public class AccountCacheService(IOptions<AccountConfiguration> config) : IAccou
 
     public bool TryRemoveWebCache(string username, string key)
     {
-        if (!_webAccQuery.TryRemove(username, out var cacheAccount))
-            return false;
-
-        return cacheAccount.Key.Equals(key);
+        return _webAccQuery.TryRemove(username, out var cacheAccount) && cacheAccount.Key.Equals(key);
     }
 
     public void AddTcpCache(string username, string key, int roleId)

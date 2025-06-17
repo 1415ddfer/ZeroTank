@@ -31,6 +31,8 @@ class Program
             sp.GetRequiredService<ObjectPoolProvider>().Create(
                 sp.GetRequiredService<IPooledObjectPolicy<VisitorClient>>()
             ));
+        // 注册VisitorClient为Scoped，这样每次从池中获取时都是新的实例
+        builder.Services.AddSingleton<VisitorClient>();
 
         // 注册服务
         // MongoDB相关服务

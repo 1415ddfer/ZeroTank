@@ -8,7 +8,7 @@ public class VisitorClientPoolPolicy(IServiceProvider serviceProvider) : IPooled
 {
     public VisitorClient Create()
     {
-        return ActivatorUtilities.CreateInstance<VisitorClient>(serviceProvider);
+        return serviceProvider.GetRequiredService<VisitorClient>();
     }
 
     public bool Return(VisitorClient client)

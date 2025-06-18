@@ -4,19 +4,11 @@ using TestTank.Server.common;
 
 namespace TestTank.Server;
 
-public class TlsClientSocket : SimpleSocket
+public class TlsClientSocket(Socket socket) : SimpleSocket(socket)
 {
-    private readonly byte[] _receiveKey;
-    byte[] _sendKey;
+    readonly byte[] _receiveKey = [174, 191, 86, 120, 171, 205, 239, 241];
+    byte[] _sendKey = [174, 191, 86, 120, 171, 205, 239, 241];
 
-
-    public TlsClientSocket(Socket socket) : base(socket)
-    {
-        _receiveKey = new byte[8];
-        _sendKey = new byte[8];
-        Array.Copy(Config.DefaultKey, _sendKey, 8);
-        Array.Copy(Config.DefaultKey, _receiveKey, 8);
-    }
 
     public void SetKey(byte[] key)
     {

@@ -1,12 +1,14 @@
 ﻿using System.Net.Sockets;
+using System.Text;
 using Microsoft.Extensions.Logging;
 using TestTank.Business.Login;
 using TestTank.Server.common;
+using TestTank.Server.proto;
 
 namespace TestTank.Server;
 
 // 用于处理客户端登录的层，登录后将socket移交给player
-public class VisitorClient(ILogger<VisitorClient> logger, PlayerAccount playerAccount) : IDisposable
+public class VisitorClient(ILogger<VisitorClient> logger, LoginModule playerAccount) : IDisposable
 {
     private TaskCompletionSource<bool>? _tcs;
     private TlsClientSocket? _socket;
@@ -77,30 +79,47 @@ public class VisitorClient(ILogger<VisitorClient> logger, PlayerAccount playerAc
             return;
         }
 
+        var loginSuccess  = false;
         // 使用注入的PlayerAccount实例
-        var roleId = playerAccount.TryLogin(packet, out var clientKey);
-        if (roleId < 0)
+        try
         {
-            var packet1 = PacketOutPool.Rent(1);
-            packet1.WriteByte(1);
-            var task = _socket.EnQueueSend(packet1);
-            logger.LogInformation("登录失败断开连接");
-            task.Wait();
+            var data = packet.Deserialize<ProtoC0>();
+            var bytes = RsaCrypt.RsaDecrypt1(data.LoginData);
+            var clientKey = bytes[7..15];
 
+            var utf8 = new UTF8Encoding();
+            var loginSrc = utf8.GetString(bytes[15..]);
+            var arr = loginSrc.Split(',', 2);
+
+            if (arr.Length != 2)
+            {
+                logger.LogWarning("登录数据格式错误");
+                return;
+            }
+
+            var task = playerAccount.TcpLoginAsync(arr[0], arr[1]);
+            var roleId =  task.Result;
+            if (roleId == 0)
+            {
+                logger.LogWarning("账号 {Username} 登录失败!", arr[0]);
+                return;
+            }
+            _socket.SetKey(clientKey);
+            loginSuccess = true;
+            // var player = PlayerManager.GetOrCreatePlayer(roleId);
+            // _ = player.OnClientLogin(_socket);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "登录时出现异常");
+        }
+        finally
+        {
+            if (!loginSuccess) _ = _socket.Disconnect();
             packet.Free();
-            _ = _socket.Disconnect();
             _socket = null;
             _returnAction?.Invoke();
-            return;
         }
-
-        _socket.SetKey(clientKey);
-        // var player = PlayerManager.GetOrCreatePlayer(roleId);
-        // packet.Free();
-        // _ = player.OnClientLogin(_socket);
-
-        _socket = null;
-        _returnAction?.Invoke();
     }
 
     public void Dispose() => Reset();

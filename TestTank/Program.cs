@@ -2,6 +2,8 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ObjectPool;
+using Microsoft.Extensions.Options;
+using MongoDB.Driver;
 using TestTank.Business;
 using TestTank.Business.Login;
 using TestTank.data;
@@ -21,7 +23,7 @@ class Program
             builder.Configuration.GetSection("Server"));
         builder.Services.Configure<MongoDbConfiguration>(
             builder.Configuration.GetSection("MongoDB"));
-        builder.Services.Configure<AccountConfiguration>(
+        builder.Services.Configure<LoginConfiguration>(
             builder.Configuration.GetSection("Account"));
 
         // 对象池配置
@@ -34,21 +36,33 @@ class Program
         // 注册VisitorClient为Scoped，这样每次从池中获取时都是新的实例
         builder.Services.AddSingleton<VisitorClient>();
 
-        // 注册服务
-        // MongoDB相关服务
-        builder.Services.AddSingleton<IMongoContext, MongoContext>();
-        builder.Services.AddSingleton<IAccountRepository, AccountRepository>();
+        // 注册MongoDB客户端
+        builder.Services.AddSingleton<IMongoClient>(provider =>
+        {
+            var config = provider.GetRequiredService<IOptions<MongoDbConfiguration>>().Value;
+            var clientSettings = MongoClientSettings.FromConnectionString(config.ConnectionString);
+            clientSettings.MaxConnectionPoolSize = config.ConnectionPoolSize;
+            clientSettings.ConnectTimeout = config.ConnectionTimeout;
+            return new MongoClient(clientSettings);
+        });
 
-        // 业务服务
-        builder.Services.AddSingleton<IAccountCacheService, AccountCacheService>();
-        builder.Services.AddSingleton<IAccountService, AccountService>();
-        builder.Services.AddTransient<PlayerAccount>();
+        builder.Services.AddSingleton<IMongoDatabase>(provider =>
+        {
+            var client = provider.GetRequiredService<IMongoClient>();
+            var config = provider.GetRequiredService<IOptions<MongoDbConfiguration>>().Value;
+            return client.GetDatabase(config.DatabaseName);
+        });
 
-        // 后台服务
-        builder.Services.AddHostedService<DatabaseInitializationService>();
-        builder.Services.AddHostedService<AccountCleanupService>();
-        builder.Services.AddHostedService<TcpServer>();
+        // 注册模块管理器
+        builder.Services.AddSingleton<IModuleManager, ModuleManager>();
+
+        // 注册具体的业务模块
+        builder.Services.RegisterModule<LoginModule, LoginConfiguration>("Account");
+
         
+        // builder.Services.AddHostedService<AccountCleanupService>();
+        builder.Services.AddHostedService<TcpServer>();
+
         // 其他服务
         builder.Services.AddSingleton<IConnectionManager, ConnectionManager>();
 

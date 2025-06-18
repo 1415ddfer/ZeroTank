@@ -1,10 +1,17 @@
 ﻿namespace TestTank.Business.Login;
 
-public static class AccountSpace
+
+public class LoginConfiguration
 {
-    public const string CollectionName = "accounts";
-    public const string CacheCollectionName = "account_cache";
+    public int ExpireTimeMinutes { get; set; } = 30;
+    public int CleanupIntervalMinutes { get; set; } = 5;
 }
+
+// public static class AccountSpace
+// {
+//     public const string CollectionName = "accounts";
+//     public const string CacheCollectionName = "account_cache";
+// }
 
 public class UserAccount
 {
@@ -28,4 +35,7 @@ public class LoginCacheAccount
     public string Key = null!;
     public DateTime Expire;
 }
+
+
+
 
